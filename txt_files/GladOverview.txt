@@ -1,0 +1,317 @@
+# GLAD (General Language Assistant and Delegate) System Overview
+
+## 1. System Architecture
+
+### 1.1 Core Components
+```
+GLAD/
+├── main.py                 # System entry point and orchestration
+├── system/                 # Core system components
+│   ├── ai/                # AI and LLM components
+│   │   ├── context.py     # LLM context management
+│   │   ├── memory.py      # Memory system
+│   │   └── xml_processor.py # XML processing
+│   └── platforms/         # Platform integrations
+│       └── telegram.py    # Telegram interface
+├── tools/                 # System tools
+│   ├── executor/         # Code execution tools
+│   │   ├── base.py       # Base executor
+│   │   ├── python_runtime.py # Python execution
+│   │   └── terminal.py   # Terminal commands
+│   └── web/             # Web tools
+│       └── perplexity.py # Web search
+├── config/               # Configuration
+├── tests/               # Test suite
+└── memory/              # Persistent storage
+```
+
+## 2. Available Tools and Capabilities
+
+### 2.1 File Operations
+1. **File Search Tools**
+   - `codebase_search`
+     * Semantic search across codebase
+     * Parameters:
+       - query: Search query
+       - target_directories: Optional directory filters
+     * Use cases: Finding relevant code, documentation
+
+   - `grep_search`
+     * Pattern-based file search
+     * Parameters:
+       - query: Regex pattern
+       - case_sensitive: Boolean
+       - include_pattern: File type filter
+       - exclude_pattern: Exclusion filter
+     * Use cases: Finding specific strings, patterns
+
+   - `file_search`
+     * Fuzzy filename search
+     * Parameters:
+       - query: Partial filename
+     * Use cases: Locating files by name
+
+2. **File Management Tools**
+   - `read_file`
+     * File content reading
+     * Parameters:
+       - relative_workspace_path: File path
+       - start_line_one_indexed: Start line
+       - end_line_one_indexed_inclusive: End line
+       - should_read_entire_file: Boolean
+     * Use cases: Code inspection, configuration reading
+
+   - `edit_file`
+     * File content modification
+     * Parameters:
+       - target_file: File path
+       - instructions: Edit description
+       - code_edit: Code changes
+     * Use cases: Code updates, configuration changes
+
+   - `delete_file`
+     * File removal
+     * Parameters:
+       - target_file: File to delete
+     * Use cases: Cleanup, restructuring
+
+### 2.2 Directory Operations
+1. **Directory Tools**
+   - `list_dir`
+     * Directory content listing
+     * Parameters:
+       - relative_workspace_path: Directory path
+     * Use cases: Project navigation, structure understanding
+
+### 2.3 Execution Tools
+1. **Terminal Operations**
+   - `run_terminal_cmd`
+     * Command execution
+     * Parameters:
+       - command: Shell command
+       - is_background: Run in background
+       - require_user_approval: Safety check
+     * Use cases: System commands, testing, package management
+
+2. **Code Execution**
+   - Python runtime environment
+   - Terminal command execution
+   - Background process management
+
+## 3. Tool Chaining and Workflow
+
+### 3.1 Task Processing Flow
+1. **Task Initialization**
+   ```xml
+   <thinking>Task analysis and planning</thinking>
+   ```
+
+2. **Information Gathering**
+   ```xml
+   <tool name="codebase_search">
+     <parameters>...</parameters>
+   </tool>
+   <r>Search results</r>
+   ```
+
+3. **File Operations**
+   ```xml
+   <tool name="read_file">
+     <parameters>...</parameters>
+   </tool>
+   <r>File contents</r>
+   ```
+
+4. **Code Modifications**
+   ```xml
+   <tool name="edit_file">
+     <parameters>...</parameters>
+   </tool>
+   <r>Edit confirmation</r>
+   ```
+
+5. **Verification**
+   ```xml
+   <tool name="run_terminal_cmd">
+     <parameters>
+       <command>pytest tests/</command>
+     </parameters>
+   </tool>
+   <r>Test results</r>
+   ```
+
+### 3.2 Tool Chaining Patterns
+
+1. **Sequential Chaining**
+   ```
+   Search → Read → Edit → Test
+   ```
+   - Example: Bug fixing workflow
+   - Tools execute in sequence
+   - Results feed into next tool
+
+2. **Conditional Chaining**
+   ```
+   Search → [If Found] → Read → [If Issue] → Edit
+   ```
+   - Branching based on results
+   - Error handling paths
+   - Validation checks
+
+3. **Iterative Chaining**
+   ```
+   Search → Read → Edit → Test → [If Failed] → Loop
+   ```
+   - Repeated operations
+   - Refinement cycles
+   - Progress tracking
+
+## 4. Memory and Context Management
+
+### 4.1 Memory System
+1. **Storage Types**
+   - Short-term context
+   - Long-term memory
+   - Tool execution history
+
+2. **Memory Operations**
+   ```xml
+   <memory>
+     <type>execution_history</type>
+     <content>Tool execution record</content>
+   </memory>
+   ```
+
+### 4.2 Context Management
+1. **Context Types**
+   - User interaction history
+   - Tool execution state
+   - Task progress tracking
+
+2. **Context Operations**
+   - State preservation
+   - History tracking
+   - Result accumulation
+
+## 5. Error Handling and Recovery
+
+### 5.1 Error Types
+1. **Tool Errors**
+   - Execution failures
+   - Parameter validation
+   - Resource access
+
+2. **System Errors**
+   - Memory limitations
+   - Timeout issues
+   - Resource constraints
+
+### 5.2 Recovery Strategies
+1. **Automatic Recovery**
+   - Retry mechanisms
+   - Alternative approaches
+   - Graceful degradation
+
+2. **User Interaction**
+   - Error notifications
+   - Guidance requests
+   - Progress updates
+
+## 6. Security and Permissions
+
+### 6.1 Security Measures
+1. **File Operations**
+   - Path validation
+   - Access controls
+   - Content verification
+
+2. **Command Execution**
+   - User approval system
+   - Command sanitization
+   - Resource limitations
+
+### 6.2 Permission System
+1. **User Permissions**
+   - Tool access control
+   - Resource limitations
+   - Operation restrictions
+
+2. **System Permissions**
+   - File system access
+   - Network operations
+   - Process management
+
+## 7. Integration Capabilities
+
+### 7.1 Platform Integration
+1. **Telegram Platform**
+   - Message handling
+   - Command processing
+   - User interaction
+
+2. **Extensibility**
+   - Platform abstraction
+   - Integration interfaces
+   - Custom platform support
+
+### 7.2 API Integration
+1. **External Services**
+   - Claude API
+   - Perplexity search
+   - Custom API support
+
+## 8. Development and Testing
+
+### 8.1 Testing Framework
+1. **Test Types**
+   - Unit tests
+   - Integration tests
+   - System tests
+
+2. **Test Tools**
+   - pytest framework
+   - Async testing
+   - Performance testing
+
+### 8.2 Development Tools
+1. **Code Quality**
+   - Linting
+   - Type checking
+   - Code formatting
+
+2. **Documentation**
+   - API documentation
+   - User guides
+   - Development guides
+
+## 9. Best Practices and Guidelines
+
+### 9.1 Tool Usage
+1. **Tool Selection**
+   - Use appropriate tools
+   - Chain efficiently
+   - Handle errors
+
+2. **Performance**
+   - Optimize chains
+   - Manage resources
+   - Cache results
+
+### 9.2 Code Management
+1. **Code Organization**
+   - Clear structure
+   - Proper naming
+   - Documentation
+
+2. **Version Control**
+   - Git integration
+   - Change tracking
+   - Collaboration support
+
+This system provides:
+- Comprehensive tool suite
+- Flexible integration options
+- Robust error handling
+- Secure operation
+- Extensible architecture
+- Clear development path 

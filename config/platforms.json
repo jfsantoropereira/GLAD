@@ -1,0 +1,13 @@
+{
+    "telegram": {
+        "message_timeout": 60,
+        "max_message_length": 4096,
+        "allowed_user_ids": [],
+        "commands": {
+            "start": "Start or restart the bot",
+            "help": "Show available commands",
+            "status": "Show system status",
+            "clear": "Clear conversation context"
+        }
+    }
+} 

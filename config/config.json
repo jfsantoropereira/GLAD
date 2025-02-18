@@ -1,0 +1,39 @@
+{
+    "system": {
+        "model": {
+            "name": "claude-3-5-sonnet-latest",
+            "max_tokens": 4000
+        },
+        "timeout": {
+            "python": 30,
+            "terminal": 30,
+            "perplexity": 10,
+            "overall_response": 60
+        },
+        "tools": {
+            "python": {
+                "enabled": true,
+                "max_execution_time": 30
+            },
+            "terminal": {
+                "enabled": true,
+                "max_execution_time": 30
+            },
+            "perplexity": {
+                "enabled": true,
+                "max_execution_time": 10,
+                "model": "sonar-pro",
+                "max_tokens": 128000,
+                "temperature": 0.7
+            }
+        },
+        "memory": {
+            "file_path": "memory/long_term.txt",
+            "max_entries": 1000
+        }
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "%(message)s"
+    }
+} 
