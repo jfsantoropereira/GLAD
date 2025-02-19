@@ -98,7 +98,7 @@ class PerplexityExecutor(BaseToolExecutor):
         if cached_result:
             formatted = self._format_result(cached_result)
             logger.info(f"Returning cached result: {formatted}")
-            return f"<result>{formatted}\n(cached result)</result>"
+            return formatted
         
         # Initialize retry counter
         retries = 0
@@ -148,7 +148,7 @@ class PerplexityExecutor(BaseToolExecutor):
                     self._cache_result(content, result)
                     formatted = self._format_result(result)
                     logger.info(f"Returning result: {formatted}")
-                    return f"<result>{formatted}</result>"
+                    return formatted
                 else:
                     last_error = "No response content received"
                     

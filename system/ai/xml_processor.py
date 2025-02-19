@@ -7,8 +7,15 @@ from typing import Dict, List, Tuple, Optional
 from tools.executor.python_runtime import PythonExecutor
 from tools.executor.terminal import TerminalExecutor
 from tools.web.perplexity import PerplexityExecutor
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class StreamResult:
+    remaining_buffer: str
+    console_output: str
+    task_complete: bool
 
 class XMLProcessor:
     """Processes XML tags in Claude's responses and executes corresponding tools."""
@@ -37,10 +44,6 @@ class XMLProcessor:
             'task': re.compile(r'<task(?:\s+id="(?P<id>[^"]*)")?\s*>(?P<content>.*?)</task>', re.DOTALL),
             'thinking': re.compile(r'<thinking>(?P<content>.*?)</thinking>', re.DOTALL),
             'answer': re.compile(r'<answer>(?P<content>.*?)</answer>', re.DOTALL),
-            'memory': re.compile(r'<memory>(?P<content>.*?)</memory>', re.DOTALL),
-            'error': re.compile(r'<error>(?P<content>.*?)</error>', re.DOTALL),
-            'progress': re.compile(r'<progress>(?P<content>.*?)</progress>', re.DOTALL),
-            'update': re.compile(r'<update>(?P<content>.*?)</update>', re.DOTALL),
             'python': re.compile(r'<python>(?P<content>.*?)</python>', re.DOTALL),
             'terminal': re.compile(r'<terminal>(?P<content>.*?)</terminal>', re.DOTALL),
             'perplexity': re.compile(r'<perplexity>(?P<content>.*?)</perplexity>', re.DOTALL),
@@ -52,6 +55,10 @@ class XMLProcessor:
         
         # Cache for compiled regex patterns
         self._regex_cache = {}
+        
+        self.task_history = {}
+        self.telegram_handler = None  # Will be set by TelegramBot
+        self.current_task = None
     
     def _get_regex(self, pattern: str) -> re.Pattern:
         """Get or compile a regex pattern."""
@@ -73,16 +80,6 @@ class XMLProcessor:
                     'start_time': datetime.now(),
                     'status': 'running'
                 }
-            
-            # Process memory tags
-            for match in self.tag_patterns['memory'].finditer(response):
-                content = match.group('content').strip()
-                memory_entries.append(content)
-            
-            # Process progress and update tags (pass through)
-            for tag_type in ['progress', 'update']:
-                for match in self.tag_patterns[tag_type].finditer(processed_response):
-                    continue  # These tags are handled by the platform interface
             
             # Process tool tags and inject results
             for tool_name in ['python', 'terminal', 'perplexity']:
@@ -114,17 +111,6 @@ class XMLProcessor:
                             processed_response[end:]
                         )
             
-            # Process endtask tags
-            for match in self.tag_patterns['endtask'].finditer(processed_response):
-                # Find the parent task and mark it as complete
-                for task_id in reversed(list(self.active_tasks.keys())):
-                    if self.active_tasks[task_id]['status'] == 'running':
-                        self.active_tasks[task_id].update({
-                            'status': 'completed',
-                            'end_time': datetime.now()
-                        })
-                        break
-            
             return processed_response, memory_entries
             
         except Exception as e:
@@ -152,24 +138,137 @@ class XMLProcessor:
         """Return information about all tasks, including completed ones."""
         return self.active_tasks.copy()
     
-    async def process_tool_execution(self, tool_content: str) -> str:
-        """Process tool execution and return raw result."""
+    def set_telegram_handler(self, handler):
+        """Set the telegram handler for sending answers."""
+        self.telegram_handler = handler
+    
+    async def process_tool_execution(self, content: str) -> str:
+        """Process tool execution tags and return the result."""
         try:
-            # Extract tool type and code
-            tool_match = re.match(r'<(python|terminal|perplexity)>(.*?)</\1>', tool_content, re.DOTALL)
-            if not tool_match:
-                return "Invalid tool format"
-            
-            tool_type = tool_match.group(1)
-            code = tool_match.group(2).strip()
-            
-            # Execute tool and return raw result
-            if tool_type == 'python':
-                return await self.executors['python'].execute(code)
-            elif tool_type == 'terminal':
-                return await self.executors['terminal'].execute(code)
-            elif tool_type == 'perplexity':
-                return await self.executors['perplexity'].execute(code)
+            # Extract tag type and content
+            tag_match = re.match(r'<(python|terminal|perplexity|answer|task)>(.*?)</\1>', content, re.DOTALL)
+            if not tag_match:
+                return "Invalid tag format"
                 
+            tag_type = tag_match.group(1)
+            tag_content = tag_match.group(2).strip()
+            
+            # Handle task tags
+            if tag_type == 'task':
+                # Extract task ID if present
+                task_id_match = re.search(r'id="([^"]*)"', content)
+                task_id = task_id_match.group(1) if task_id_match else f"task-{len(self.task_history) + 1}"
+                
+                # Only create new task if we're not in one
+                if not self.current_task:
+                    self.current_task = task_id
+                    self.active_tasks[task_id] = {
+                        'start_time': datetime.now(),
+                        'status': 'running'
+                    }
+                return f"Started task {task_id}"
+            
+            # Handle endtask
+            if '</endtask>' in content:
+                if self.current_task:
+                    task_id = self.current_task
+                    self.active_tasks[task_id].update({
+                        'status': 'completed',
+                        'end_time': datetime.now()
+                    })
+                    self.task_history[task_id] = self.active_tasks[task_id]
+                    self.current_task = None
+                return "Task completed"
+            
+            # Handle answer tags
+            if tag_type == 'answer':
+                if self.telegram_handler:
+                    await self.telegram_handler.send_answer(tag_content)
+                return tag_content
+            
+            # Handle tool tags
+            if tag_type in self.executors:
+                try:
+                    return await asyncio.wait_for(
+                        self.executors[tag_type].execute(tag_content),
+                        timeout=self.config[tag_type]['max_execution_time']
+                    )
+                except asyncio.TimeoutError:
+                    return f"Tool execution timed out after {self.config[tag_type]['max_execution_time']} seconds"
+                except Exception as e:
+                    return f"Tool execution failed: {str(e)}"
+            
+            return f"Unhandled tag type: {tag_type}"
+            
         except Exception as e:
-            return f"Error executing {tool_type}: {str(e)}" 
+            logger.error(f"Error processing tag: {e}")
+            return f"Error processing tag: {str(e)}"
+
+    async def start_task(self, message: str) -> str:
+        """Create a new task with the given message."""
+        task_id = f"task-{len(self.task_history) + 1}"
+        self.current_task = task_id
+        self.active_tasks[task_id] = {
+            'start_time': datetime.now(),
+            'status': 'running'
+        }
+        return f'<task id="{task_id}">\n{message}'
+
+    async def process_stream_buffer(self, buffer: str) -> StreamResult:
+        """Process the streaming buffer and handle any complete tags."""
+        console_output = []
+        remaining = buffer
+        task_complete = False
+        should_pause = False
+        tool_execution_complete = True  # Track if tool execution is complete
+
+        # Look for complete tags
+        for tag_name, pattern in self.tag_patterns.items():
+            match = pattern.search(remaining)
+            if match and tag_name != 'endtask':  # Skip processing endtask tags
+                # Extract the complete tag
+                start, end = match.span()
+                tag_content = remaining[start:end]
+                
+                # Process the tag
+                if tag_name == 'thinking':
+                    console_output.append(f"\033[94m{tag_content}\033[0m")
+                elif tag_name == 'answer':
+                    result = await self.process_tool_execution(tag_content)
+                    console_output.append(f"\033[92m{tag_content}\033[0m")
+                elif tag_name in ['python', 'terminal', 'perplexity']:
+                    # Signal that we need to pause token generation
+                    should_pause = True
+                    tool_execution_complete = False
+                    result = await self.process_tool_execution(tag_content)
+                    
+                    # Start yellow color block
+                    console_output.append("\033[93m")
+                    # Add the tool call
+                    console_output.append(tag_content)
+                    
+                    # Add the result if any and verify injection
+                    if result:
+                        result_tag = f"<result>{result}</result>"
+                        console_output.append(result_tag)
+                        # Verify result is properly injected before continuing
+                        if result_tag in console_output[-1]:
+                            tool_execution_complete = True
+                    
+                    # End yellow color block
+                    console_output.append("\033[0m")
+                
+                # Only remove processed tag from buffer if tool execution is complete
+                if tool_execution_complete:
+                    remaining = remaining[end:]
+
+        # Check if the AI generated an endtask tag (but don't process it)
+        if '</endtask>' in buffer:
+            task_complete = True
+            console_output.append("="*80)
+
+        return StreamResult(
+            remaining_buffer=remaining if tool_execution_complete else buffer,  # Return full buffer if tool execution isn't complete
+            console_output="\n".join(console_output),
+            task_complete=task_complete
+        ) 

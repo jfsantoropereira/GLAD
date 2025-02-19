@@ -12,48 +12,13 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-class TelegramLogHandler(logging.Handler):
-    """Custom log handler that processes answer tags in real-time."""
-    
-    def __init__(self, telegram_bot):
-        super().__init__()
-        self.telegram_bot = telegram_bot
-        self.answer_pattern = re.compile(r'<answer>(.*?)</answer>', re.DOTALL)
-    
-    def emit(self, record):
-        """Process and send answer tags immediately."""
-        try:
-            if record.name == 'system.ai.context':
-                message = record.getMessage()
-                
-                # Look for answer tags in the log message
-                for match in self.answer_pattern.finditer(message):
-                    content = match.group(1).strip()
-                    if content and self.telegram_bot.current_message:
-                        # Create event loop if needed (for non-async contexts)
-                        try:
-                            loop = asyncio.get_running_loop()
-                        except RuntimeError:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                        
-                        # Send message immediately
-                        loop.create_task(self.telegram_bot._send_message_chunks(
-                            self.telegram_bot.current_message,
-                            content
-                        ))
-                        
-        except Exception as e:
-            logger.error(f"Error processing log message: {e}")
-
-
 class TelegramBot:
     def __init__(self, llm_context: LLMContext, memory_manager: MemoryManager):
         self.bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
         self.dp = Dispatcher()
         self.llm_context = llm_context
         self.memory_manager = memory_manager
-        self.current_message = None  # Store current message for log handler
+        self.current_message = None
         
         # Load platform config
         with open('config/platforms.json', 'r') as f:
@@ -63,17 +28,8 @@ class TelegramBot:
         with open('config/config.json', 'r') as f:
             self.system_config = json.load(f)['system']
         
-        # Compile regex patterns for message processing
-        self.message_patterns = {
-            'error': re.compile(r'<error>(.*?)</error>', re.DOTALL),
-            'progress': re.compile(r'<progress>(.*?)</progress>', re.DOTALL),
-            'update': re.compile(r'<update>(.*?)</update>', re.DOTALL),
-            'answer': re.compile(r'<answer>(.*?)</answer>', re.DOTALL)
-        }
-        
-        # Add custom log handler
-        self.log_handler = TelegramLogHandler(self)
-        logging.getLogger('system.ai.context').addHandler(self.log_handler)
+        # Register with XML processor for answer handling
+        self.llm_context.xml_processor.set_telegram_handler(self)
         
         # Register handlers
         self._register_handlers()
@@ -195,6 +151,11 @@ class TelegramBot:
         self.llm_context.clear_context()
         await message.reply("🧹 Conversation context has been cleared.")
     
+    async def send_answer(self, content: str):
+        """Send answer content to current telegram chat."""
+        if self.current_message and content.strip():
+            await self._send_message_chunks(self.current_message, content.strip())
+    
     async def _send_message_chunks(self, message: types.Message, text: str) -> None:
         """Send a message in chunks if it's too long."""
         if len(text) > self.config['max_message_length']:
@@ -236,10 +197,12 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error handling message: {e}")
             logger.exception("Full exception details:")
-            await message.reply(
-                "😕 Sorry, I encountered an error processing your message. "
-                "Please try again later."
-            )
+            if self.current_message:
+                await self.current_message.reply(
+                    "😕 Sorry, I encountered an error processing your message. "
+                    "Please try again later."
+                )
+            self.current_message = None
     
     async def start(self):
         """Start the bot."""

@@ -22,7 +22,7 @@ class BaseToolExecutor:
     
     def format_result(self, result: str) -> str:
         """Format the execution result."""
-        return f"<answer>{result}</answer>"
+        return result
     
     def format_error(self, error: str) -> str:
         """Format an error message."""
