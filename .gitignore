@@ -40,4 +40,8 @@ Thumbs.db
 
 # Project specific
 memory/long_term.txt
-*.log 
+*.log
+
+# Security
+secure/
+deploy_key.txt 
