@@ -271,4 +271,4 @@ class XMLProcessor:
             remaining_buffer=remaining if tool_execution_complete else buffer,  # Return full buffer if tool execution isn't complete
             console_output="\n".join(console_output),
             task_complete=task_complete
-        ) 
+        )

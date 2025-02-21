@@ -5,6 +5,7 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from system.platforms.telegram import TelegramBot
+from system.platforms.console import ConsoleHandler
 from system.ai.context import LLMContext
 from system.ai.memory import MemoryManager
 import re
@@ -33,17 +34,36 @@ async def main():
         llm_context = LLMContext()
         memory_manager = MemoryManager()
         
-        # Initialize platform interfaces
-        telegram_bot = TelegramBot(llm_context, memory_manager)
+        # Ask user for platform choice
+        print("\nWelcome to GLAD! Please choose your platform:")
+        print("1. Telegram")
+        print("2. Console")
         
-        # Start platform interfaces
-        logger.info("Starting GLAD system...")
-        await telegram_bot.start()
+        while True:
+            choice = input("\nEnter your choice (1 or 2): ").strip()
+            if choice in ['1', '2']:
+                break
+            print("Invalid choice. Please enter 1 for Telegram or 2 for Console.")
         
+        if choice == '1':
+            # Check for Telegram token
+            if not os.getenv('TELEGRAM_BOT_TOKEN'):
+                print("Error: TELEGRAM_BOT_TOKEN not found in environment variables.")
+                return
+            
+            # Start Telegram bot
+            bot = TelegramBot(llm_context, memory_manager)
+            await bot.start()
+        else:
+            # Start Console interface
+            console = ConsoleHandler(llm_context, memory_manager)
+            await console.start()
+        
+    except KeyboardInterrupt:
+        print("\nShutting down...")
     except Exception as e:
-        logger.error(f"Failed to start GLAD system: {e}")
+        logger.error(f"Error running GLAD: {e}")
         logger.exception("Full exception details:")
-        raise
 
 async def process_response(self, response: str) -> Tuple[str, List[str]]:
     processed_response = response
