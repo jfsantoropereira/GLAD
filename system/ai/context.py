@@ -192,76 +192,93 @@ print(result)
             current_tool_call = ""
             current_tool_result = ""
             
+            # Track if we need to regenerate response due to tool results
+            needs_regeneration = False
+            tool_results = []
+            
             # Get streaming response from Claude
             try:
                 logger.info("Creating message stream...")
-                message = self.client.messages.create(
-                    model=self.config['model']['name'],
-                    max_tokens=self.config['model']['max_tokens'],
-                    system=system,
-                    messages=messages,
-                    stream=True
-                )
+                
+                while True:  # Allow for potential regeneration
+                    message_stream = self.client.messages.create(
+                        model=self.config['model']['name'],
+                        max_tokens=self.config['model']['max_tokens'],
+                        system=system,
+                        messages=messages,
+                        stream=True
+                    )
 
-                logger.info("Starting to process stream...")
-                for event in message:
-                    if hasattr(event, 'type'):
-                        logger.debug(f"Event type: {event.type}")
+                    logger.info("Starting to process stream...")
+                    buffer = ""
+                    processed_response = ""
                     
-                    if event.type == "content_block_delta":
-                        if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
-                            content = event.delta.text
-                            if content:
-                                logger.debug(f"Received content delta: {content}")
-                                buffer += content
-                                processed_response += content
+                    for event in message_stream:
+                        if hasattr(event, 'type') and event.type == "content_block_delta":
+                            if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
+                                content = event.delta.text
+                                if content:
+                                    buffer += content
+                                    processed_response += content
 
-                                # Process complete tags in buffer
-                                result = await self.xml_processor.process_stream_buffer(buffer)
-                                
-                                # Print any console output from XML processor
-                                if result.console_output:
-                                    print(result.console_output)
+                                    # Process complete tags in buffer
+                                    result = await self.xml_processor.process_stream_buffer(buffer)
                                     
-                                    # Extract and store thinking content
-                                    if "<thinking>" in buffer and "</thinking>" in buffer:
-                                        thinking_match = re.search(r'<thinking>(.*?)</thinking>', buffer, re.DOTALL)
-                                        if thinking_match:
-                                            current_thinking = thinking_match.group(1).strip()
-                                            chronological_context.append({"role": "assistant", "content": f"<thinking>{current_thinking}</thinking>"})
+                                    if result.console_output:
+                                        print(result.console_output)
+                                        
+                                        # Handle thinking content
+                                        if "<thinking>" in buffer and "</thinking>" in buffer:
+                                            thinking_match = re.search(r'<thinking>(.*?)</thinking>', buffer, re.DOTALL)
+                                            if thinking_match:
+                                                current_thinking = thinking_match.group(1).strip()
+                                                chronological_context.append({"role": "assistant", "content": f"<thinking>{current_thinking}</thinking>"})
+                                        
+                                        # Handle tool calls and results
+                                        for tool in ['python', 'terminal', 'perplexity']:
+                                            if f"<{tool}>" in buffer and f"</{tool}>" in buffer:
+                                                tool_match = re.search(f'<{tool}>(.*?)</{tool}>', buffer, re.DOTALL)
+                                                if tool_match:
+                                                    current_tool_call = tool_match.group(1).strip()
+                                                    chronological_context.append({"role": "assistant", "content": f"<{tool}>{current_tool_call}</{tool}>"})
+                                                    
+                                                    # Process tool results
+                                                    if "<result>" in result.console_output and "</result>" in result.console_output:
+                                                        result_match = re.search(r'<result>(.*?)</result>', result.console_output, re.DOTALL)
+                                                        if result_match:
+                                                            current_tool_result = result_match.group(1).strip()
+                                                            # Store tool result in chronological context
+                                                            chronological_context.append({"role": "assistant", "content": f"<result>{current_tool_result}</result>"})
+                                                            # Add tool result as assistant message for next iteration
+                                                            tool_results.append({
+                                                                "role": "assistant",
+                                                                "content": f"Based on my search, here is what I found:\n{current_tool_result}"
+                                                            })
+                                                            needs_regeneration = True
                                     
-                                    # Extract and store tool calls and results
-                                    for tool in ['python', 'terminal', 'perplexity']:
-                                        if f"<{tool}>" in buffer and f"</{tool}>" in buffer:
-                                            tool_match = re.search(f'<{tool}>(.*?)</{tool}>', buffer, re.DOTALL)
-                                            if tool_match:
-                                                current_tool_call = tool_match.group(1).strip()
-                                                chronological_context.append({"role": "assistant", "content": f"<{tool}>{current_tool_call}</{tool}>"})
+                                    if buffer == result.remaining_buffer:
+                                        continue
                                     
-                                    # Store tool results
-                                    if "<result>" in result.console_output and "</result>" in result.console_output:
-                                        result_match = re.search(r'<result>(.*?)</result>', result.console_output, re.DOTALL)
-                                        if result_match:
-                                            current_tool_result = result_match.group(1).strip()
-                                            chronological_context.append({"role": "tool", "content": f"<result>{current_tool_result}</result>"})
-                                
-                                # Only update buffer and continue if tool execution is complete
-                                if buffer == result.remaining_buffer:
-                                    continue
-                                
-                                buffer = result.remaining_buffer
-                                
-                                # Let the AI determine when to end the task
-                                if result.task_complete:
-                                    if self.xml_processor.current_task:
-                                        task_id = self.xml_processor.current_task
-                                        self.xml_processor.active_tasks[task_id].update({
-                                            'status': 'completed',
-                                            'end_time': datetime.now()
-                                        })
-                                        self.xml_processor.task_history[task_id] = self.xml_processor.active_tasks[task_id]
-                                        self.xml_processor.current_task = None
-                                    break
+                                    buffer = result.remaining_buffer
+                                    
+                                    if result.task_complete:
+                                        if self.xml_processor.current_task:
+                                            task_id = self.xml_processor.current_task
+                                            self.xml_processor.active_tasks[task_id].update({
+                                                'status': 'completed',
+                                                'end_time': datetime.now()
+                                            })
+                                            self.xml_processor.task_history[task_id] = self.xml_processor.active_tasks[task_id]
+                                            self.xml_processor.current_task = None
+                                        break
+                    
+                    # If we got tool results, add them to messages and regenerate
+                    if needs_regeneration and tool_results:
+                        messages.extend(tool_results)
+                        tool_results = []
+                        needs_regeneration = False
+                        continue  # Regenerate response with tool results
+                    break  # No regeneration needed, exit loop
 
                 logger.info(f"Stream processing complete. Response length: {len(processed_response)}")
                 if not processed_response:
