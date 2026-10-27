@@ -24,6 +24,22 @@ class TelegramBot:
         with open('config/platforms.json', 'r') as f:
             self.config = json.load(f)['telegram']
         
+        # Sender allowlist: fail closed if it is empty or missing.
+        try:
+            self.allowed_user_ids = frozenset(
+                int(uid) for uid in (self.config.get('allowed_user_ids') or [])
+            )
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(
+                "telegram.allowed_user_ids in config/platforms.json must be a "
+                f"list of numeric Telegram user IDs: {e}"
+            ) from e
+        if not self.allowed_user_ids:
+            raise RuntimeError(
+                "Refusing to start the Telegram bot: telegram.allowed_user_ids in "
+                "config/platforms.json is empty. Set it to your numeric Telegram user ID."
+            )
+        
         # Load system config for tool status
         with open('config/config.json', 'r') as f:
             self.system_config = json.load(f)['system']
@@ -34,17 +50,23 @@ class TelegramBot:
         # Register handlers
         self._register_handlers()
     
+    def _is_authorized(self, message: types.Message) -> bool:
+        """Filter: only senders in allowed_user_ids may reach any handler."""
+        user = getattr(message, 'from_user', None)
+        return user is not None and user.id in self.allowed_user_ids
+    
     def _register_handlers(self):
         """Register message and command handlers."""
+        auth = self._is_authorized
         # Command handlers
-        self.dp.message.register(self.cmd_start, Command('start'))
-        self.dp.message.register(self.cmd_help, Command('help'))
-        self.dp.message.register(self.cmd_status, Command('status'))
-        self.dp.message.register(self.cmd_clear, Command('clear'))
-        self.dp.message.register(self.cmd_tasks, Command('tasks'))
+        self.dp.message.register(self.cmd_start, auth, Command('start'))
+        self.dp.message.register(self.cmd_help, auth, Command('help'))
+        self.dp.message.register(self.cmd_status, auth, Command('status'))
+        self.dp.message.register(self.cmd_clear, auth, Command('clear'))
+        self.dp.message.register(self.cmd_tasks, auth, Command('tasks'))
         
         # General message handler
-        self.dp.message.register(self.handle_message)
+        self.dp.message.register(self.handle_message, auth)
     
     async def cmd_start(self, message: types.Message):
         """Handle /start command."""
