@@ -45,6 +45,8 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 PERPLEXITY_API_KEY=your_perplexity_api_key
 ```
 
+5. Telegram access: `telegram.allowed_user_ids` in `config/platforms.json` must list the owner's numeric Telegram user ID (e.g. `[123456789]`); the bot refuses to start while it is empty and ignores every other sender.
+
 ## Usage
 
 Run the main application:
